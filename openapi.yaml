@@ -1,0 +1,948 @@
+openapi: 3.1.0
+info:
+  title: Open Practice API
+  version: 1.0.0
+  summary: Same-origin JSON and ICS endpoints of the Open Practice SSR Worker
+  description: |
+    Public and authenticated routes served by the Astro Cloudflare Worker
+    under `/api/*`. Production traffic is same-origin with the HTML site.
+
+    Authentication uses an HttpOnly session cookie. Password login is retired
+    (`410`). Mutating methods require a same-origin CSRF check
+    (`Sec-Fetch-Site` / `Origin`).
+
+    This specification is a contract snapshot for the public showcase.
+    It does not include handler source, secrets, or production hostnames.
+  contact:
+    name: Open Practice
+    url: https://example.com
+  license:
+    name: Documentation only
+
+servers:
+  - url: https://api.example.com
+    description: Sanitized example origin (production is same-origin SSR)
+
+tags:
+  - name: Public
+    description: No session required
+  - name: Auth
+    description: Magic-link login and session lifecycle
+  - name: Dashboard
+    description: Authenticated aggregate for the editorial UI
+  - name: Content
+    description: Posts, methods, events, categories
+  - name: Admin
+    description: User administration
+
+security:
+  - SessionCookie: []
+
+paths:
+  /api/contact:
+    post:
+      tags: [Public]
+      operationId: submitContact
+      summary: Submit the public contact form
+      security: []
+      description: |
+        CSRF required. Body cap 32 KiB. IP rate limit via KV
+        (5 requests / 10 minutes). Honeypot field `website`: non-empty values
+        still return `ok` without delivery. Messages are emailed, not stored in D1.
+        Production without mail channel or KV → `503`. Non-production may no-op.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContactRequest"
+            example:
+              name: Jane Doe
+              email: jane@example.com
+              subject: Question about a method
+              message: Short message text.
+              website: ""
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "400":
+          description: Validation or invalid JSON
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FieldError"
+        "403":
+          $ref: "#/components/responses/Csrf"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          description: Delivery or rate-limit store not configured (production)
+
+  /api/events-subscribe.ics:
+    get:
+      tags: [Public]
+      operationId: subscribeEventsIcs
+      summary: Published events as iCalendar feed
+      security: []
+      parameters:
+        - in: query
+          name: lang
+          schema: { type: string, enum: [de, en], default: de }
+        - in: query
+          name: scope
+          schema: { type: string, enum: [all, filtered], default: all }
+        - in: query
+          name: price
+          schema: { type: string, default: all }
+        - in: query
+          name: city
+          schema: { type: string, default: all }
+          description: Exact city name when filtering
+        - in: query
+          name: language
+          schema: { type: string, default: all }
+        - in: query
+          name: dateFrom
+          schema: { type: string, format: date }
+        - in: query
+          name: dateTo
+          schema: { type: string, format: date }
+        - in: query
+          name: q
+          schema: { type: string }
+          description: Case-insensitive substring search
+      responses:
+        "200":
+          description: VCALENDAR document of published events
+          headers:
+            Cache-Control:
+              schema: { type: string, example: "public, max-age=60, must-revalidate" }
+          content:
+            text/calendar:
+              schema: { type: string }
+              example: |
+                BEGIN:VCALENDAR
+                VERSION:2.0
+                PRODID:-//Open Practice//Events//EN
+                END:VCALENDAR
+
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      operationId: passwordLoginDisabled
+      summary: Password login (permanently disabled)
+      security: []
+      responses:
+        "410":
+          description: Use Magic Link instead
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorMessage"
+              example:
+                error: Password login disabled. Use Magic Link.
+
+  /api/auth/magic/request:
+    post:
+      tags: [Auth]
+      operationId: requestMagicLink
+      summary: Request a magic-link email
+      security: []
+      description: |
+        CSRF required. Email-based KV rate limit. Unknown addresses still
+        return `ok` (no user enumeration). Known users receive a 15-minute
+        hashed token. Production without mail channel → `503`.
+        Non-production may include a debug URL field — omitted here.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  maxLength: 254
+            example:
+              email: user@example.com
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Csrf"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          description: Mail channel required but not configured (production)
+
+  /api/auth/magic/verify:
+    get:
+      tags: [Auth]
+      operationId: verifyMagicLink
+      summary: Consume magic-link token and start a session
+      security: []
+      description: |
+        Browser redirect flow, not JSON. Invalid or missing token → login page.
+        Valid token is marked used, existing sessions for that user are dropped,
+        a new D1 session is created, cookie is set, redirect to dashboard.
+      parameters:
+        - in: query
+          name: token
+          required: true
+          schema: { type: string }
+      responses:
+        "302":
+          description: Redirect to dashboard or login
+          headers:
+            Location:
+              schema: { type: string, example: /dashboard }
+            Set-Cookie:
+              schema:
+                type: string
+                example: op_session=example-token; HttpOnly; Secure; SameSite=Lax; Path=/
+
+  /api/auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: Invalidate the current session
+      description: Deletes the D1 session row and clears the cookie. CSRF required.
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Csrf"
+
+  /api/dashboard.json:
+    get:
+      tags: [Dashboard]
+      operationId: getDashboard
+      summary: Editorial dashboard aggregate
+      description: |
+        Returns the viewer plus scoped collections. Admins see all users,
+        events, posts, and methods. Non-admins receive own events/posts,
+        `users` as `[viewer]`, methods only with `can_methods`, and always
+        the published methods catalog plus full category list.
+      responses:
+        "200":
+          description: Dashboard payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/posts:
+    post:
+      tags: [Content]
+      operationId: createPost
+      summary: Create a blog post
+      description: Requires session, CSRF, and `is_admin` or `can_posts`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostWrite"
+      responses:
+        "200":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkWithId"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/ServerError"
+    put:
+      tags: [Content]
+      operationId: updatePost
+      summary: Update a blog post
+      description: Owner or admin; `can_posts` required. CSRF required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostWrite"
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/ServerError"
+    delete:
+      tags: [Content]
+      operationId: deletePost
+      summary: Delete a blog post
+      description: Owner or admin; `can_posts` required. CSRF required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IdBody"
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  /api/methods:
+    post:
+      tags: [Content]
+      operationId: createMethod
+      summary: Create a method
+      description: Requires session, CSRF, and `is_admin` or `can_methods`. Slugs are derived server-side.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MethodWrite"
+      responses:
+        "200":
+          description: Created with numeric id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkWithNumericId"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/ServerError"
+    put:
+      tags: [Content]
+      operationId: updateMethod
+      summary: Update a method
+      description: Owner or admin; `can_methods` required. CSRF required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MethodWrite"
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/ServerError"
+    delete:
+      tags: [Content]
+      operationId: deleteMethod
+      summary: Delete a method
+      description: Owner or admin; `can_methods` required. CSRF required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: integer }
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  /api/events:
+    post:
+      tags: [Content]
+      operationId: createEvent
+      summary: Create an event
+      description: Any authenticated user may create events. CSRF required. Rich text is sanitized to an allowlist.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EventWrite"
+      responses:
+        "200":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkWithId"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/ServerError"
+    put:
+      tags: [Content]
+      operationId: updateEvent
+      summary: Update an event
+      description: Owner or admin. CSRF required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EventWrite"
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/ServerError"
+    delete:
+      tags: [Content]
+      operationId: deleteEvent
+      summary: Delete an event
+      description: Owner or admin. CSRF required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IdBody"
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  /api/categories:
+    get:
+      tags: [Content]
+      operationId: listCategories
+      summary: List blog/method categories
+      responses:
+        "200":
+          description: Category catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [categories]
+                properties:
+                  categories:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Category"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Content]
+      operationId: createCategory
+      summary: Create a category
+      description: Admin or `can_categories`. CSRF required. Slug derived from `nameDe`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryWrite"
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    put:
+      tags: [Content]
+      operationId: updateCategory
+      summary: Update a category
+      description: Admin or `can_categories`. CSRF required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryWrite"
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    delete:
+      tags: [Content]
+      operationId: deleteCategory
+      summary: Delete a category
+      description: |
+        Admin or `can_categories`. CSRF required. `409` if posts or methods
+        still reference the category.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IdBody"
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/users:
+    post:
+      tags: [Admin]
+      operationId: upsertUser
+      summary: Create or replace a user
+      description: Admin-only. CSRF required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserWrite"
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkWithId"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    put:
+      tags: [Admin]
+      operationId: updateUser
+      summary: Update a user
+      description: Admin-only. CSRF required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserWrite"
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    delete:
+      tags: [Admin]
+      operationId: deleteUser
+      summary: Delete a user
+      description: Admin-only. CSRF required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IdBody"
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+components:
+  securitySchemes:
+    SessionCookie:
+      type: apiKey
+      in: cookie
+      name: op_session
+      description: HttpOnly session cookie (7-day TTL), validated against D1.
+
+  responses:
+    Ok:
+      description: Success
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Ok"
+    BadRequest:
+      description: Validation or malformed JSON
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorMessage"
+    Unauthorized:
+      description: Missing or expired session
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorMessage"
+          example: { error: Unauthorized. }
+    Forbidden:
+      description: CSRF failure, missing permission, or not owner
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorMessage"
+    Csrf:
+      description: Cross-site mutation blocked
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorMessage"
+          example: { error: CSRF validation failed. }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorMessage"
+    Conflict:
+      description: Unique name or in-use category
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorMessage"
+    RateLimited:
+      description: Rate limit exceeded
+      headers:
+        Retry-After:
+          schema: { type: integer, example: 600 }
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorMessage"
+    ServerError:
+      description: Persistence failure
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorMessage"
+
+  schemas:
+    Ok:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean, enum: [true] }
+
+    OkWithId:
+      type: object
+      required: [ok, id]
+      properties:
+        ok: { type: boolean, enum: [true] }
+        id: { type: string, format: uuid }
+
+    OkWithNumericId:
+      type: object
+      required: [ok, id]
+      properties:
+        ok: { type: boolean, enum: [true] }
+        id: { type: integer }
+
+    IdBody:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string }
+
+    ErrorMessage:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+
+    FieldError:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string, example: Validation failed. }
+        fields:
+          type: object
+          additionalProperties: { type: string }
+
+    TrustLevel:
+      type: string
+      enum: [draft, approved, verified]
+
+    ContentStatus:
+      type: string
+      enum: [draft, scheduled, published, rejected]
+
+    EventStatus:
+      type: string
+      enum: [draft, published, rejected]
+
+    SessionUser:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email, example: user@example.com }
+        is_admin: { type: integer, enum: [0, 1] }
+        trust_level:
+          $ref: "#/components/schemas/TrustLevel"
+        can_events: { type: integer, enum: [0, 1] }
+        can_posts: { type: integer, enum: [0, 1] }
+        can_methods: { type: integer, enum: [0, 1] }
+        can_categories: { type: integer, enum: [0, 1] }
+
+    Category:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name_de: { type: string }
+        name_en: { type: string }
+        slug: { type: string }
+
+    CategoryWrite:
+      type: object
+      required: [nameDe, nameEn]
+      properties:
+        id: { type: string, format: uuid }
+        nameDe: { type: string, example: Clarity }
+        nameEn: { type: string, example: Clarity }
+
+    ContactRequest:
+      type: object
+      required: [name, email, subject, message]
+      properties:
+        name: { type: string, maxLength: 120 }
+        email: { type: string, format: email, maxLength: 254 }
+        subject: { type: string, maxLength: 200 }
+        message: { type: string, maxLength: 8000 }
+        website:
+          type: string
+          description: Honeypot; must be empty for real submissions
+          default: ""
+
+    PostWrite:
+      type: object
+      required:
+        - titleDe
+        - titleEn
+        - descriptionShortDe
+        - descriptionShortEn
+        - contentDe
+        - contentEn
+        - categoryId
+      properties:
+        id: { type: string, format: uuid }
+        titleDe: { type: string, maxLength: 200 }
+        titleEn: { type: string, maxLength: 200 }
+        descriptionShortDe: { type: string, minLength: 10, maxLength: 600 }
+        descriptionShortEn: { type: string, minLength: 10, maxLength: 600 }
+        contentDe: { type: string, maxLength: 60000 }
+        contentEn: { type: string, maxLength: 60000 }
+        categoryId: { type: string, format: uuid }
+        postDate: { type: string, format: date }
+        publishAt:
+          type: string
+          description: Local wall time `YYYY-MM-DDTHH:MM` when scheduling is allowed
+        status:
+          $ref: "#/components/schemas/ContentStatus"
+        relatedMethodIds:
+          type: array
+          items: { type: integer }
+        rejectionReason:
+          type: string
+          description: Admin-only on update
+
+    MethodWrite:
+      type: object
+      required:
+        - titleDe
+        - titleEn
+        - previewDe
+        - previewEn
+        - descriptionDe
+        - descriptionEn
+        - stepsDe
+        - stepsEn
+        - categoryId
+      properties:
+        id: { type: integer }
+        titleDe: { type: string, maxLength: 200 }
+        titleEn: { type: string, maxLength: 200 }
+        previewDe: { type: string, minLength: 10, maxLength: 600 }
+        previewEn: { type: string, minLength: 10, maxLength: 600 }
+        descriptionDe: { type: string, minLength: 20, maxLength: 8000 }
+        descriptionEn: { type: string, minLength: 20, maxLength: 8000 }
+        stepsDe:
+          oneOf:
+            - type: array
+              items: { type: string }
+            - type: string
+        stepsEn:
+          oneOf:
+            - type: array
+              items: { type: string }
+            - type: string
+        categoryId: { type: string, format: uuid }
+        postDate: { type: string, format: date }
+        publishAt: { type: string }
+        status:
+          $ref: "#/components/schemas/ContentStatus"
+        timeDe: { type: string, maxLength: 80 }
+        timeEn: { type: string, maxLength: 80 }
+        noteDe: { type: string, maxLength: 4000 }
+        noteEn: { type: string, maxLength: 4000 }
+        sourceDe: { type: string, maxLength: 400 }
+        sourceEn: { type: string, maxLength: 400 }
+        quickHelpTags:
+          description: JSON object or string; omitted on PUT keeps existing tags
+        rejectionReason: { type: string }
+
+    EventWrite:
+      type: object
+      required:
+        - titleDe
+        - titleEn
+        - eventDate
+        - startTime
+        - endTime
+        - city
+        - location
+        - price
+        - descriptionShortDe
+        - descriptionShortEn
+        - descriptionLongDe
+        - descriptionLongEn
+      properties:
+        id: { type: string, format: uuid }
+        titleDe: { type: string, maxLength: 200 }
+        titleEn: { type: string, maxLength: 200 }
+        eventDate: { type: string, format: date }
+        startTime: { type: string, example: "18:00" }
+        endTime: { type: string, example: "20:00" }
+        city: { type: string, maxLength: 120 }
+        location: { type: string, maxLength: 512 }
+        price: { type: string, maxLength: 120 }
+        descriptionShortDe: { type: string }
+        descriptionShortEn: { type: string }
+        descriptionLongDe: { type: string }
+        descriptionLongEn: { type: string }
+        spokenLanguage: { type: string, maxLength: 300, default: Deutsch }
+        languages:
+          type: array
+          items: { type: string }
+        externalLink:
+          type: string
+          format: uri
+        status:
+          $ref: "#/components/schemas/EventStatus"
+        rejectionReason: { type: string }
+
+    UserWrite:
+      type: object
+      required: [id, email]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email, example: user@example.com }
+        isAdmin: { type: boolean }
+        trustLevel:
+          $ref: "#/components/schemas/TrustLevel"
+        canEvents: { type: boolean }
+        canPosts: { type: boolean }
+        canMethods: { type: boolean }
+        canCategories: { type: boolean }
+
+    DashboardResponse:
+      type: object
+      properties:
+        viewer:
+          $ref: "#/components/schemas/SessionUser"
+        isAdmin: { type: boolean }
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionUser"
+        events:
+          type: array
+          items: { type: object, additionalProperties: true }
+        posts:
+          type: array
+          items: { type: object, additionalProperties: true }
+        categories:
+          type: array
+          items:
+            $ref: "#/components/schemas/Category"
+        methods:
+          type: array
+          items: { type: object, additionalProperties: true }
+        methodsCatalog:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              title_de: { type: string }
+              title_en: { type: string }
+              preview_de: { type: string }
+              preview_en: { type: string }
+              category_name_de: { type: string }
+              category_name_en: { type: string }
