@@ -1,10 +1,10 @@
-# Architektur: Cloudflare Edge & D1
+# Architecture: Cloudflare Edge & D1
 
-Technische Sicht auf Open Practice als **SSR-Worker am Cloudflare-Edge**. Keine produktiven IDs, keine Seeds, keine Handler-Implementierung.
+Technical view of Open Practice as an **SSR worker on the Cloudflare edge**. No production IDs, no seeds, no handler implementations.
 
-## 1. Edge-Infrastruktur
+## 1. Edge infrastructure
 
-Zwei Worker teilen sich dieselbe logische Datenbank, erfüllen aber unterschiedliche Rollen.
+Two workers share the same logical database and fill different roles.
 
 ```mermaid
 flowchart LR
@@ -35,28 +35,28 @@ flowchart LR
   Hourly --> D1
 ```
 
-| Komponente | Rolle |
+| Component | Role |
 | :--- | :--- |
-| **App-Worker** | Astro `output: 'server'` + Cloudflare-Adapter. Liefert HTML (SSR-Injection öffentlicher Kataloge) und JSON/ICS unter `/api/*`. Custom Domains, kein öffentliches `*.workers.dev`. |
-| **Scheduled Worker** | Cron: täglich 03:00 UTC Events mit Datum älter als fünf Tage auf `draft` setzen (Datensatz bleibt). Stündlich fällige Blog-Posts und Methoden von `scheduled` nach `published`. |
-| **D1 `op_db`** | Nutzer, Sessions, Magic-Link-Tokens, Events, Blog, Methoden, Kategorien. |
-| **KV `SESSION`** | Nur Rate-Limits. **Keine** Session-Speicherung. |
-| **Images** | Medien-Binding der App. |
-| **ASSETS** | Client-Bundle des Astro-Builds. |
+| **App worker** | Astro `output: 'server'` + Cloudflare adapter. Serves HTML (SSR injection of public catalogs) and JSON/ICS under `/api/*`. Custom domains only — no public `*.workers.dev`. |
+| **Scheduled worker** | Cron: daily at 03:00 UTC, set events older than five days to `draft` (rows are kept). Hourly, publish due blog posts and methods from `scheduled` to `published`. |
+| **D1 `op_db`** | Users, sessions, magic-link tokens, events, blog, methods, categories. |
+| **KV `SESSION`** | Rate limits only. **Not** used for session storage. |
+| **Images** | Media binding for the app. |
+| **ASSETS** | Client bundle from the Astro build. |
 
-### Umgebungen
+### Environments
 
-| Umgebung | Muster |
+| Environment | Pattern |
 | :--- | :--- |
-| Production | Custom Domain, D1-Produktion, Mail-Versand Pflicht für Magic Link und Kontakt |
-| Preview / Staging | Eigener Worker-Name, **eigene** D1, gleiches Binding `op_db`. Ohne Mail-Konfiguration: sicheres No-Op (kein Versand, API bleibt `ok`) |
-| Lokal | Wrangler-lokale D1 für Dev und E2E — getrennt von Remote-Daten |
+| Production | Custom domain, production D1, mail delivery required for magic link and contact |
+| Preview / staging | Separate worker name, **separate** D1, same `op_db` binding. Without mail config: safe no-op (no send, API still returns `ok`) |
+| Local | Wrangler-local D1 for dev and E2E — isolated from remote data |
 
-Outbound (nur als Capabilities, ohne URLs): transaktionale E-Mail (primär) und optionaler Notify-Webhook `{ kind, payload }`.
+Outbound (capabilities only, no URLs): transactional email (primary) and an optional notify webhook `{ kind, payload }`.
 
-## 2. Request-Flüsse
+## 2. Request flows
 
-### Öffentliche Seite
+### Public page
 
 ```mermaid
 sequenceDiagram
@@ -69,7 +69,7 @@ sequenceDiagram
   Worker-->>Browser: HTML plus SSR payload
 ```
 
-### Magic Link (Auth)
+### Magic link (auth)
 
 ```mermaid
 sequenceDiagram
@@ -90,30 +90,30 @@ sequenceDiagram
   API-->>Browser: Set-Cookie redirect dashboard
 ```
 
-Passwort-Login (`POST /api/auth/login`) ist dauerhaft `410 Gone`.
+Password login (`POST /api/auth/login`) is permanently `410 Gone`.
 
-### Mutierende Dashboard-APIs
+### Mutating dashboard APIs
 
-1. Session-Cookie (HttpOnly, `SameSite=Lax`, `Secure`, TTL 7 Tage) gegen `user_sessions` ⋈ `users`
-2. CSRF: `Sec-Fetch-Site: cross-site` ablehnen; gesetztes `Origin` muss Request-Origin entsprechen
-3. Autorisierung: `is_admin`, Owner (`user_id`) oder `can_posts` / `can_methods` / `can_categories`
-4. Events anlegen: jeder authentifizierte Account (kein `can_events`-Gate auf API-Ebene)
+1. Session cookie (HttpOnly, `SameSite=Lax`, `Secure`, 7-day TTL) checked against `user_sessions` ⋈ `users`
+2. CSRF: reject `Sec-Fetch-Site: cross-site`; if `Origin` is set, it must match the request origin
+3. Authorization: `is_admin`, owner (`user_id`), or `can_posts` / `can_methods` / `can_categories`
+4. Creating events: any authenticated account (no `can_events` gate at the API layer)
 
-## 3. i18n und öffentliche Oberflächen
+## 3. i18n and public surfaces
 
-| Modus | Beispiele | Sprachwechsel |
+| Mode | Examples | Language switch |
 | :--- | :--- | :--- |
-| Toggle | `/`, `/blog`, `/events` | Gleiche URL, UI-Locale |
-| Navigate | `/favoriten` ↔ `/favorites`, Site Pages | Partner-URL |
-| Detail | `/methoden/{slug}`, `/methods/{slug}`, `/blog/{slug}`, `/events/{slug}` | Partner-URL der Ressource |
+| Toggle | `/`, `/blog`, `/events` | Same URL, UI locale |
+| Navigate | `/favoriten` ↔ `/favorites`, site pages | Partner URL |
+| Detail | `/methoden/{slug}`, `/methods/{slug}`, `/blog/{slug}`, `/events/{slug}` | Resource partner URL |
 
-Statische Rechtstexte (About, Datenschutz, Impressum, Kontakt) liegen als Content, **nicht** in D1. Die Sitemap (`/sitemap.xml`) mischt Registry-URLs mit zur Laufzeit veröffentlichten D1-Einträgen.
+Static legal/content pages (about, privacy, imprint, contact) live as content, **not** in D1. The sitemap (`/sitemap.xml`) mixes registry URLs with published D1 entries at runtime.
 
-Favoriten bleiben clientseitig. Legacy-Pfade `/praxis` und `/practice` leiten per 301 auf die Gespeichert-Seiten.
+Favorites stay client-side. Legacy paths `/praxis` and `/practice` 301-redirect to the saved-items pages.
 
-## 4. D1-Datenmodell
+## 4. D1 data model
 
-Abstraktes Relationenmodell. Keine Seed-Zeilen, keine Dumps.
+Abstract relational model. No seed rows, no dumps.
 
 ```mermaid
 erDiagram
@@ -236,21 +236,21 @@ erDiagram
   }
 ```
 
-### Semantik (ohne DDL-Skript)
+### Semantics (no DDL script)
 
-| Thema | Regel |
+| Topic | Rule |
 | :--- | :--- |
-| IDs | Nutzer, Events, Posts, Kategorien: Text/UUID. Methoden: stabile **Integer**-IDs (Favoriten und Related Methods). |
-| Bilingual | `_de` / `_en` Spalten, keine Locale-Tabellen. |
-| Status | Inhalte: `draft` \| `scheduled` \| `published` \| `rejected` (Events ohne `scheduled`). |
-| Trust | `draft` (Review), `approved` (kann direkt publizieren), `verified`. Unabhängig von `can_*`. |
-| Related Methods | `blog_posts.related_method_ids` ist eine serialisierte ID-Liste, kein Join-Table. |
-| Kategorien | Löschen blockiert, solange Posts oder Methoden referenzieren. |
-| Auth-Tokens | Magic-Link speichert **Hash**, nicht Klartext; Einmalnutzung über `used_at`. |
+| IDs | Users, events, posts, categories: text/UUID. Methods: stable **integer** IDs (favorites and related methods). |
+| Bilingual | `_de` / `_en` columns, no locale tables. |
+| Status | Content: `draft` \| `scheduled` \| `published` \| `rejected` (events have no `scheduled`). |
+| Trust | `draft` (review), `approved` (may publish directly), `verified`. Independent of `can_*`. |
+| Related methods | `blog_posts.related_method_ids` is a serialized ID list, not a join table. |
+| Categories | Delete is blocked while posts or methods still reference the category. |
+| Auth tokens | Magic link stores a **hash**, not plaintext; one-time use via `used_at`. |
 
-Nützliche Index-Familien: `(status, post_date)` und `user_id` / `category_id` auf Posts und Methoden; Slugs und `(status, publish_at)` auf Methoden.
+Useful index families: `(status, post_date)` and `user_id` / `category_id` on posts and methods; slugs and `(status, publish_at)` on methods.
 
-## 5. Sicherheitsarchitektur (Ist)
+## 5. Security architecture (as built)
 
 ```mermaid
 flowchart TB
@@ -262,22 +262,22 @@ flowchart TB
   Handler --> RL[KV_RateLimit]
 ```
 
-| Ebene | Vertrag |
+| Layer | Contract |
 | :--- | :--- |
-| CSRF | Mutierende Routen außer dokumentierten Public-Sonderfällen |
-| Session | Cookie `op_session`, Validierung gegen D1, nicht KV |
-| XSS | Server-seitige Rich-Text-Allowlist; enge Längenlimits |
+| CSRF | Mutating routes except documented public exceptions |
+| Session | Cookie `op_session`, validated against D1, not KV |
+| XSS | Server-side rich-text allowlist; tight field length limits |
 | HTTP | CSP, `X-Frame-Options: DENY`, `nosniff`, JSON `Cache-Control: no-store` |
-| Rate-Limit | Magic Link (E-Mail, fail-open ohne KV); Kontakt (IP, fail-closed in Production ohne KV) |
-| Enumeration | Unbekannte Magic-Link-E-Mail → gleiches `ok` wie bekannte |
-| Kontakt | Kein D1-Insert; Honeypot-Feld wird still mit `ok` beantwortet |
+| Rate limit | Magic link (email, fail-open without KV); contact (IP, fail-closed in production without KV) |
+| Enumeration | Unknown magic-link email → same `ok` as a known address |
+| Contact | No D1 insert; honeypot field still answered with `ok` |
 
-Bewusst offen: kein globales API-Throttling; CSP wird manuell gepflegt.
+Left open by design: no global API throttling; CSP is maintained by hand.
 
-## 6. Qualitätsgatter (ohne Pipeline-Code)
+## 6. Quality gates (no pipeline code)
 
-Typische Kette vor einem Production-Deploy: Dependency-Audit (high) → Unit- und Security-Coverage → Worker-Build → Bundle-/Cron-Smoke → E2E. Remote-D1-Schreiben ist betrieblich gegated (Bestätigung), getrennt von diesem Showcase.
+Typical chain before a production deploy: dependency audit (high) → unit and security coverage → worker build → bundle/cron smoke → E2E. Remote D1 writes are operationally gated (confirmation), separate from this showcase.
 
-## 7. API-Verweis
+## 7. API reference
 
-Vollständige HTTP-Verträge: [../openapi.yaml](../openapi.yaml).
+Full HTTP contracts: [../openapi.yaml](../openapi.yaml).
