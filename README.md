@@ -1,16 +1,16 @@
-# Open Practice — Architecture Showcase
+# Open Practice - Architecture Showcase
 
-Public architecture and API documentation for **[Open Practice](https://open-practice.org)** — a free, bilingual collection of methods for clarity, self-regulation, and conscious action in everyday life.
+Public architecture and API documentation for **[Open Practice](https://open-practice.org)** - a free, bilingual collection of methods for clarity, self-regulation, and conscious action in everyday life.
 
 **Live site:** [https://open-practice.org](https://open-practice.org)
 
-This repository contains **no** application logic and **no** production data. It describes the system through diagrams, OpenAPI, and architectural notes — meant to be read, discussed, and shared without mirroring the private app repository.
+This repository contains **no** application logic and **no** production data. It describes the system through diagrams, OpenAPI, and architectural notes - meant to be read, discussed, and shared without mirroring the private app repository.
 
-> Prevention and information only — not a substitute for diagnosis or therapy.
+> Prevention and information only - not a substitute for diagnosis or therapy.
 
 ## Help shape what comes next
 
-Open Practice is a living, open project. If you would like to help it grow — as a practitioner, writer, therapist, designer, or engineer — you are welcome.
+Open Practice is a living, open project. If you would like to help it grow - as a practitioner, writer, therapist, designer, or engineer - you are welcome.
 
 - **Use and share** the methods on the [live site](https://open-practice.org)
 - **Write or review** bilingual content (methods, blog, events)
@@ -23,7 +23,7 @@ There is no paywall and no recruiting funnel. If the project resonates, say hell
 
 Knowledge about mental health and body regulation should be a common good: no paywall, no tracking, no data collection for advertising. Open Practice combines structured software architecture with an editorially curated catalog of methods, blog posts, and practice events.
 
-The platform is for practitioners, guest authors, and moderators who publish bilingual (DE/EN) content — with a clear review workflow rather than an open wiki.
+The platform is for practitioners, guest authors, and moderators who publish bilingual (DE/EN) content - with a clear review workflow rather than an open wiki.
 
 ## Tech stack
 
@@ -39,18 +39,18 @@ The platform is for practitioners, guest authors, and moderators who publish bil
 | Rich text | Quill (dashboard editor) |
 | Quality | TypeScript, Vitest, Playwright, Wrangler 4 |
 
-Production secrets (`API_KEY`, sender addresses, optional webhooks) live only in the Worker secret store — **not** in this repository.
+Production secrets (`API_KEY`, sender addresses, optional webhooks) live only in the Worker secret store - **not** in this repository.
 
 ## Feature highlights
 
-- **Method catalog** — bilingual exercises with steps, categories, and optional scheduling (`draft` / `scheduled` / `published`)
-- **Blog** — posts with categories, related methods, and review status
-- **Events** — dates with location, price, and language; public ICS feed
-- **DE/EN without prefixes** — listings share a URL (`/`, `/blog`, `/events`); content pages use partner paths (`/kontakt` ↔ `/contact`)
-- **Favorites in the browser only** — `localStorage` / `sessionStorage`, no server sync
-- **Dashboard & roles** — admin flag, trust level (`draft` / `approved` / `verified`), and fine-grained `can_*` grants
-- **Contact form** — public, honeypot- and rate-limit-protected, not stored in D1
-- **Scheduled publishing** — separate cron worker (hourly posts/methods, daily event archival)
+- **Method catalog** - bilingual exercises with steps, categories, and optional scheduling (`draft` / `scheduled` / `published`)
+- **Blog** - posts with categories, related methods, and review status
+- **Events** - dates with location, price, and language; public ICS feed
+- **DE/EN without prefixes** - listings share a URL (`/`, `/blog`, `/events`); content pages use partner paths (`/kontakt` ↔ `/contact`)
+- **Favorites in the browser only** - `localStorage` / `sessionStorage`, no server sync
+- **Dashboard & roles** - admin flag, trust level (`draft` / `approved` / `verified`), and fine-grained `can_*` grants
+- **Contact form** - public, honeypot- and rate-limit-protected, not stored in D1
+- **Scheduled publishing** - separate cron worker (hourly posts/methods, daily event archival)
 
 ## System architecture
 
@@ -108,3 +108,7 @@ flowchart TB
 - Production environment variables
 
 Derivations from the private app repo follow the showcase rule: **abstract, sanitize, document**.
+
+## License
+
+This repository is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE). Noncommercial use, study, and sharing are permitted; commercial use is not. See the license text for the full terms.

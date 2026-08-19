@@ -17,7 +17,8 @@ info:
     name: Open Practice
     url: https://example.com
   license:
-    name: Documentation only
+    name: PolyForm Noncommercial License 1.0.0
+    identifier: PolyForm-Noncommercial-1.0.0
 
 servers:
   - url: https://api.example.com
@@ -152,7 +153,7 @@ paths:
         CSRF required. Email-based KV rate limit. Unknown addresses still
         return `ok` (no user enumeration). Known users receive a 15-minute
         hashed token. Production without mail channel → `503`.
-        Non-production may include a debug URL field — omitted here.
+        Non-production may include a debug URL field - omitted here.
       requestBody:
         required: true
         content:

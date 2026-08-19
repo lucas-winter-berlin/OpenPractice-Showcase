@@ -1,5 +1,5 @@
 ---
-description: Technical Writer/Solution Architect for the public showcase — no 1:1 source leaks, sanitization, abstraction into diagrams/OpenAPI/ADRs
+description: Technical Writer/Solution Architect for the public showcase - no 1:1 source leaks, sanitization, abstraction into diagrams/OpenAPI/ADRs
 alwaysApply: true
 ---
 
@@ -18,8 +18,8 @@ Public showcase documents (README, architecture notes, OpenAPI descriptions) are
 NEVER copy application or business-logic code 1:1 from the private repository into this public repository.
 
 ```text
-❌ BAD  — lift a production handler/query/service 1:1
-✅ GOOD — sequence diagram (Mermaid) + OpenAPI path + ADR or pseudocode
+❌ BAD  - lift a production handler/query/service 1:1
+✅ GOOD - sequence diagram (Mermaid) + OpenAPI path + ADR or pseudocode
 ```
 
 ## 2. SENSITIVE DATA
@@ -50,8 +50,8 @@ Always translate code logic into:
 From database scripts, produce Entity-Relationship diagrams (Mermaid) or abstract DDL documentation only. Do not copy production seed data or dumps.
 
 ```text
-❌ BAD  — INSERT seeds, dumps, real customer data
-✅ GOOD — Mermaid ER diagram or anonymized DDL (tables, columns, relations)
+❌ BAD  - INSERT seeds, dumps, real customer data
+✅ GOOD - Mermaid ER diagram or anonymized DDL (tables, columns, relations)
 ```
 
 # Execution Workflow

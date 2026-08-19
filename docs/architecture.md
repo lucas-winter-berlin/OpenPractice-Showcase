@@ -37,7 +37,7 @@ flowchart LR
 
 | Component | Role |
 | :--- | :--- |
-| **App worker** | Astro `output: 'server'` + Cloudflare adapter. Serves HTML (SSR injection of public catalogs) and JSON/ICS under `/api/*`. Custom domains only — no public `*.workers.dev`. |
+| **App worker** | Astro `output: 'server'` + Cloudflare adapter. Serves HTML (SSR injection of public catalogs) and JSON/ICS under `/api/*`. Custom domains only - no public `*.workers.dev`. |
 | **Scheduled worker** | Cron: daily at 03:00 UTC, set events older than five days to `draft` (rows are kept). Hourly, publish due blog posts and methods from `scheduled` to `published`. |
 | **D1 `op_db`** | Users, sessions, magic-link tokens, events, blog, methods, categories. |
 | **KV `SESSION`** | Rate limits only. **Not** used for session storage. |
@@ -50,7 +50,7 @@ flowchart LR
 | :--- | :--- |
 | Production | Custom domain, production D1, mail delivery required for magic link and contact |
 | Preview / staging | Separate worker name, **separate** D1, same `op_db` binding. Without mail config: safe no-op (no send, API still returns `ok`) |
-| Local | Wrangler-local D1 for dev and E2E — isolated from remote data |
+| Local | Wrangler-local D1 for dev and E2E - isolated from remote data |
 
 Outbound (capabilities only, no URLs): transactional email (primary) and an optional notify webhook `{ kind, payload }`.
 
