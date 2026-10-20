@@ -17,8 +17,8 @@ info:
     name: Open Practice
     url: https://example.com
   license:
-    name: PolyForm Noncommercial License 1.0.0
-    identifier: PolyForm-Noncommercial-1.0.0
+    name: MIT
+    identifier: MIT
 
 servers:
   - url: https://api.example.com
@@ -29,10 +29,12 @@ tags:
     description: No session required
   - name: Auth
     description: Magic-link login and session lifecycle
-  - name: Dashboard
-    description: Authenticated aggregate for the editorial UI
+  - name: Studio
+    description: Authenticated aggregate and studio-only routes
   - name: Content
     description: Posts, methods, events, categories
+  - name: ContentRead
+    description: Bearer-token published JSON for outside callers
   - name: Admin
     description: User administration
 
@@ -189,7 +191,7 @@ paths:
       description: |
         Browser redirect flow, not JSON. Invalid or missing token → login page.
         Valid token is marked used, existing sessions for that user are dropped,
-        a new D1 session is created, cookie is set, redirect to dashboard.
+        a new D1 session is created, cookie is set, redirect to studio.
       parameters:
         - in: query
           name: token
@@ -197,10 +199,10 @@ paths:
           schema: { type: string }
       responses:
         "302":
-          description: Redirect to dashboard or login
+          description: Redirect to studio or login
           headers:
             Location:
-              schema: { type: string, example: /dashboard }
+              schema: { type: string, example: /studio }
             Set-Cookie:
               schema:
                 type: string
@@ -220,23 +222,24 @@ paths:
         "403":
           $ref: "#/components/responses/Csrf"
 
-  /api/dashboard.json:
+  /api/studio.json:
     get:
-      tags: [Dashboard]
-      operationId: getDashboard
-      summary: Editorial dashboard aggregate
+      tags: [Studio]
+      operationId: getStudio
+      summary: Editorial studio aggregate
       description: |
         Returns the viewer plus scoped collections. Admins see all users,
-        events, posts, and methods. Non-admins receive own events/posts,
-        `users` as `[viewer]`, methods only with `can_methods`, and always
-        the published methods catalog plus full category list.
+        events, posts, and methods. Non-admins receive own rows when that
+        tab is visible, `users` as `[]`, `methodsCatalog` only with posts
+        create or edit, and categories only when the posts, methods, or
+        categories tab is visible. Empty grants return empty lists, not `403`.
       responses:
         "200":
-          description: Dashboard payload
+          description: Studio payload
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DashboardResponse"
+                $ref: "#/components/schemas/StudioResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
 
@@ -245,7 +248,7 @@ paths:
       tags: [Content]
       operationId: createPost
       summary: Create a blog post
-      description: Requires session, CSRF, and `is_admin` or `can_posts`.
+      description: Requires session, CSRF, and `is_admin` or posts show-tab plus `can_posts_create`.
       requestBody:
         required: true
         content:
@@ -271,7 +274,7 @@ paths:
       tags: [Content]
       operationId: updatePost
       summary: Update a blog post
-      description: Owner or admin; `can_posts` required. CSRF required.
+      description: Owner or admin; posts show-tab plus edit or publish. CSRF required.
       requestBody:
         required: true
         content:
@@ -295,7 +298,7 @@ paths:
       tags: [Content]
       operationId: deletePost
       summary: Delete a blog post
-      description: Owner or admin; `can_posts` required. CSRF required.
+      description: Owner or admin; posts show-tab plus `can_posts_edit`. CSRF required.
       requestBody:
         required: true
         content:
@@ -319,7 +322,7 @@ paths:
       tags: [Content]
       operationId: createMethod
       summary: Create a method
-      description: Requires session, CSRF, and `is_admin` or `can_methods`. Slugs are derived server-side.
+      description: Requires session, CSRF, and `is_admin` or methods show-tab plus `can_methods_create`. Slugs are derived server-side.
       requestBody:
         required: true
         content:
@@ -345,7 +348,7 @@ paths:
       tags: [Content]
       operationId: updateMethod
       summary: Update a method
-      description: Owner or admin; `can_methods` required. CSRF required.
+      description: Owner or admin; methods show-tab plus edit or publish. CSRF required.
       requestBody:
         required: true
         content:
@@ -369,7 +372,7 @@ paths:
       tags: [Content]
       operationId: deleteMethod
       summary: Delete a method
-      description: Owner or admin; `can_methods` required. CSRF required.
+      description: Owner or admin; methods show-tab plus `can_methods_edit`. CSRF required.
       requestBody:
         required: true
         content:
@@ -396,7 +399,7 @@ paths:
       tags: [Content]
       operationId: createEvent
       summary: Create an event
-      description: Any authenticated user may create events. CSRF required. Rich text is sanitized to an allowlist.
+      description: Requires session, CSRF, and `is_admin` or events show-tab plus `can_events_create`. Rich text is sanitized to an allowlist.
       requestBody:
         required: true
         content:
@@ -422,7 +425,7 @@ paths:
       tags: [Content]
       operationId: updateEvent
       summary: Update an event
-      description: Owner or admin. CSRF required.
+      description: Owner or admin; events show-tab plus edit or publish. CSRF required.
       requestBody:
         required: true
         content:
@@ -446,7 +449,7 @@ paths:
       tags: [Content]
       operationId: deleteEvent
       summary: Delete an event
-      description: Owner or admin. CSRF required.
+      description: Owner or admin; events show-tab plus `can_events_edit`. CSRF required.
       requestBody:
         required: true
         content:
@@ -616,6 +619,224 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /api/studio/translate:
+    post:
+      tags: [Studio]
+      operationId: translateStudioFields
+      summary: Fill empty studio fields in the other language
+      description: |
+        Workers AI. Session and CSRF required. Caller needs create or edit
+        on the named resource. Rate limit 10 requests / 10 minutes / user
+        via KV. Does not write D1. Missing AI or KV → `503`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TranslateRequest"
+      responses:
+        "200":
+          description: Translated strings for the submitted items
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranslateResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          description: AI or rate-limit store not configured
+
+  /api/studio/analytics:
+    get:
+      tags: [Studio]
+      operationId: getStudioAnalytics
+      summary: Studio analytics report
+      description: |
+        Session required. Admin or `can_analytics`. No CSRF.
+        Without the analytics read secret and account id: `configured: false`.
+      parameters:
+        - in: query
+          name: window
+          schema: { type: string, enum: [24h, 7d, 30d], default: 7d }
+        - in: query
+          name: surface
+          schema: { type: string, enum: [methods, blog, events, page] }
+          description: Empty means all surfaces
+      responses:
+        "200":
+          description: Report or unconfigured marker
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "502":
+          description: Analytics query failed
+
+  /api/telemetry:
+    post:
+      tags: [Public]
+      operationId: postTelemetry
+      summary: Same-origin content telemetry
+      security: []
+      description: |
+        CSRF required. Body cap 1 KiB. No visitor id. Same-origin always
+        answers `204`, including when the body is discarded. Verified bots
+        are not written. Writes go to Analytics Engine.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TelemetryEvent"
+      responses:
+        "204":
+          description: Accepted or discarded
+        "403":
+          $ref: "#/components/responses/Csrf"
+
+  /api/content/posts:
+    get:
+      tags: [ContentRead]
+      operationId: listPublishedPosts
+      security: [{ ContentApiToken: [] }]
+      summary: List published posts
+      description: |
+        Bearer token. `503` if the secret is unset, then `401` if the token
+        does not match. No session, no CSRF, no CORS. Drafts are omitted.
+      parameters:
+        - $ref: "#/components/parameters/ContentLang"
+        - $ref: "#/components/parameters/ContentQuery"
+        - $ref: "#/components/parameters/ContentLimit"
+      responses:
+        "200":
+          $ref: "#/components/responses/ContentList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          description: Content API is not configured
+
+  /api/content/posts/{slug}:
+    get:
+      tags: [ContentRead]
+      operationId: getPublishedPost
+      security: [{ ContentApiToken: [] }]
+      summary: Published post detail
+      parameters:
+        - $ref: "#/components/parameters/ContentSlug"
+        - $ref: "#/components/parameters/ContentLang"
+      responses:
+        "200":
+          $ref: "#/components/responses/ContentDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          description: Content API is not configured
+
+  /api/content/methods:
+    get:
+      tags: [ContentRead]
+      operationId: listPublishedMethods
+      security: [{ ContentApiToken: [] }]
+      summary: List published methods
+      description: List items omit practice text. Detail adds description and steps.
+      parameters:
+        - $ref: "#/components/parameters/ContentLang"
+        - $ref: "#/components/parameters/ContentQuery"
+        - $ref: "#/components/parameters/ContentLimit"
+      responses:
+        "200":
+          $ref: "#/components/responses/ContentList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          description: Content API is not configured
+
+  /api/content/methods/{slug}:
+    get:
+      tags: [ContentRead]
+      operationId: getPublishedMethod
+      security: [{ ContentApiToken: [] }]
+      summary: Published method detail
+      parameters:
+        - $ref: "#/components/parameters/ContentSlug"
+        - $ref: "#/components/parameters/ContentLang"
+      responses:
+        "200":
+          $ref: "#/components/responses/ContentDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          description: Content API is not configured
+
+  /api/content/events:
+    get:
+      tags: [ContentRead]
+      operationId: listPublishedEvents
+      security: [{ ContentApiToken: [] }]
+      summary: List published events
+      parameters:
+        - $ref: "#/components/parameters/ContentLang"
+        - $ref: "#/components/parameters/ContentQuery"
+        - $ref: "#/components/parameters/ContentLimit"
+        - in: query
+          name: dateFrom
+          schema: { type: string, format: date }
+        - in: query
+          name: dateTo
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          $ref: "#/components/responses/ContentList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          description: Content API is not configured
+
+  /api/content/events/{slug}:
+    get:
+      tags: [ContentRead]
+      operationId: getPublishedEvent
+      security: [{ ContentApiToken: [] }]
+      summary: Published event detail
+      parameters:
+        - $ref: "#/components/parameters/ContentSlug"
+        - $ref: "#/components/parameters/ContentLang"
+      responses:
+        "200":
+          $ref: "#/components/responses/ContentDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          description: Content API is not configured
+
 components:
   securitySchemes:
     SessionCookie:
@@ -623,6 +844,10 @@ components:
       in: cookie
       name: op_session
       description: HttpOnly session cookie (7-day TTL), validated against D1.
+    ContentApiToken:
+      type: http
+      scheme: bearer
+      description: Shared secret for the published content-read API. No session.
 
   responses:
     Ok:
@@ -684,6 +909,39 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorMessage"
+    ContentList:
+      description: Published list. `truncated` is present only when the cut dropped rows.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ContentList"
+    ContentDetail:
+      description: Published detail
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ContentDetail"
+
+  parameters:
+    ContentLang:
+      in: query
+      name: lang
+      schema: { type: string, enum: [de, en], default: de }
+    ContentQuery:
+      in: query
+      name: q
+      schema: { type: string }
+      description: Optional case-insensitive substring on list routes
+    ContentLimit:
+      in: query
+      name: limit
+      schema: { type: integer, minimum: 1, maximum: 100 }
+      description: Omitted means all hits, at most 100
+    ContentSlug:
+      in: path
+      name: slug
+      required: true
+      schema: { type: string }
 
   schemas:
     Ok:
@@ -748,9 +1006,21 @@ components:
         trust_level:
           $ref: "#/components/schemas/TrustLevel"
         can_events: { type: integer, enum: [0, 1] }
+        can_events_create: { type: integer, enum: [0, 1] }
+        can_events_edit: { type: integer, enum: [0, 1] }
+        can_events_publish: { type: integer, enum: [0, 1] }
         can_posts: { type: integer, enum: [0, 1] }
+        can_posts_create: { type: integer, enum: [0, 1] }
+        can_posts_edit: { type: integer, enum: [0, 1] }
+        can_posts_publish: { type: integer, enum: [0, 1] }
         can_methods: { type: integer, enum: [0, 1] }
+        can_methods_create: { type: integer, enum: [0, 1] }
+        can_methods_edit: { type: integer, enum: [0, 1] }
+        can_methods_publish: { type: integer, enum: [0, 1] }
         can_categories: { type: integer, enum: [0, 1] }
+        can_categories_create: { type: integer, enum: [0, 1] }
+        can_categories_edit: { type: integer, enum: [0, 1] }
+        can_analytics: { type: integer, enum: [0, 1] }
 
     Category:
       type: object
@@ -908,11 +1178,23 @@ components:
         trustLevel:
           $ref: "#/components/schemas/TrustLevel"
         canEvents: { type: boolean }
+        canEventsCreate: { type: boolean }
+        canEventsEdit: { type: boolean }
+        canEventsPublish: { type: boolean }
         canPosts: { type: boolean }
+        canPostsCreate: { type: boolean }
+        canPostsEdit: { type: boolean }
+        canPostsPublish: { type: boolean }
         canMethods: { type: boolean }
+        canMethodsCreate: { type: boolean }
+        canMethodsEdit: { type: boolean }
+        canMethodsPublish: { type: boolean }
         canCategories: { type: boolean }
+        canCategoriesCreate: { type: boolean }
+        canCategoriesEdit: { type: boolean }
+        canAnalytics: { type: boolean }
 
-    DashboardResponse:
+    StudioResponse:
       type: object
       properties:
         viewer:
@@ -947,3 +1229,61 @@ components:
               preview_en: { type: string }
               category_name_de: { type: string }
               category_name_en: { type: string }
+
+    TranslateRequest:
+      type: object
+      required: [resource, items]
+      properties:
+        resource: { type: string, enum: [methods, posts, events] }
+        items:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            type: object
+            required: [field, text, sourceLang, targetLang]
+            properties:
+              field: { type: string }
+              text: { type: string, maxLength: 60000 }
+              sourceLang: { type: string, enum: [de, en] }
+              targetLang: { type: string, enum: [de, en] }
+
+    TranslateResponse:
+      type: object
+      additionalProperties: true
+
+    AnalyticsResponse:
+      type: object
+      required: [configured]
+      properties:
+        configured: { type: boolean }
+        report: { type: object, additionalProperties: true }
+
+    TelemetryEvent:
+      type: object
+      properties:
+        type: { type: string }
+        surface: { type: string }
+        id: { type: string }
+        from: { type: string }
+        ref: { type: string }
+        dwell_s: { type: number }
+        depth: { type: number }
+        lang: { type: string, enum: [de, en] }
+
+    ContentList:
+      type: object
+      required: [lang, items]
+      properties:
+        lang: { type: string, enum: [de, en] }
+        items:
+          type: array
+          items: { type: object, additionalProperties: true }
+        truncated: { type: boolean }
+
+    ContentDetail:
+      type: object
+      required: [lang, item]
+      properties:
+        lang: { type: string, enum: [de, en] }
+        item: { type: object, additionalProperties: true }

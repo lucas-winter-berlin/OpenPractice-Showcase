@@ -1,0 +1,11 @@
+name: site-open-practice
+kind: site
+visibility: public
+description: Public architecture notes for Open Practice. No application source.
+languages: [markdown]
+status: active
+owner: baxx
+license: MIT
+product: Open Practice
+former: OpenPractice-Showcase
+github: lucas-winter-berlin/OpenPractice-Showcase
