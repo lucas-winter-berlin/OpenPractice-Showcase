@@ -23,12 +23,16 @@ flowchart LR
     D1[(D1)]
     KV[(KV_rate_limits)]
     Img[Images]
+    AI[Workers_AI]
+    AE[Analytics_Engine]
   end
 
   SSR --> HTML
   SSR --> API
   API --> D1
   API --> KV
+  API --> AI
+  API --> AE
   HTML --> D1
   HTML --> Img
   Daily --> D1
@@ -38,9 +42,11 @@ flowchart LR
 | Component | Role |
 | :--- | :--- |
 | **App worker** | Astro `output: 'server'` + Cloudflare adapter. Serves HTML (SSR injection of public catalogs) and JSON/ICS under `/api/*`. Custom domains only - no public `*.workers.dev`. |
-| **Scheduled worker** | Cron: daily at 03:00 UTC, set events older than five days to `draft` (rows are kept). Hourly, publish due blog posts and methods from `scheduled` to `published`. |
+| **Scheduled worker** | Cron: daily at 03:00 UTC, set events older than five days to `draft` (rows are kept) and delete expired sessions and magic-link tokens. Hourly, publish due blog posts and methods from `scheduled` to `published`. Not deployed with the app worker. |
 | **D1 `op_db`** | Users, sessions, magic-link tokens, events, blog, methods, categories. |
-| **KV `SESSION`** | Rate limits only. **Not** used for session storage. |
+| **KV `SESSION`** | Rate limits only (magic-link, contact, studio translate). **Not** used for session storage. |
+| **Workers AI** | Studio translate. Does not write D1. |
+| **Analytics Engine** | Same-origin telemetry. Studio analytics reads it back. |
 | **Images** | Media binding for the app. |
 | **ASSETS** | Client bundle from the Astro build. |
 
@@ -87,17 +93,25 @@ sequenceDiagram
   API->>Mail: magic_login_link
   Browser->>API: GET /api/auth/magic/verify?token
   API->>D1: consume token create session
-  API-->>Browser: Set-Cookie redirect dashboard
+  API-->>Browser: Set-Cookie redirect studio
 ```
 
 Password login (`POST /api/auth/login`) is permanently `410 Gone`.
 
-### Mutating dashboard APIs
+### Mutating studio APIs
 
 1. Session cookie (HttpOnly, `SameSite=Lax`, `Secure`, 7-day TTL) checked against `user_sessions` ⋈ `users`
 2. CSRF: reject `Sec-Fetch-Site: cross-site`; if `Origin` is set, it must match the request origin
-3. Authorization: `is_admin`, owner (`user_id`), or `can_posts` / `can_methods` / `can_categories`
-4. Creating events: any authenticated account (no `can_events` gate at the API layer)
+3. Authorization: `is_admin` bypasses grants and owner checks. Otherwise show-tab plus the matching create / edit / publish flag, and owner (`user_id`) for updates and deletes
+4. Events use the same grant model as posts and methods. There is no "any signed-in user may create events" exception
+
+### Content-read API
+
+Bearer token, GET only, six routes under `/api/content/{posts,methods,events}`. Published rows only. No session, no CSRF, no CORS. Empty or missing token secret → `503`; wrong Bearer → `401`. Query: `lang` (`de` default), list `q` and `limit` (1–100), event list also `dateFrom` / `dateTo`. Responses omit `userId`, status, rejection reasons, and email.
+
+### Telemetry
+
+`POST /api/telemetry` is same-origin. CSRF applies. Always `204` for a trusted request, including when the body is discarded. No visitor id. Verified bots are not written.
 
 ## 3. i18n and public surfaces
 
@@ -132,9 +146,21 @@ erDiagram
     int is_admin
     text trust_level
     int can_events
+    int can_events_create
+    int can_events_edit
+    int can_events_publish
     int can_posts
+    int can_posts_create
+    int can_posts_edit
+    int can_posts_publish
     int can_methods
+    int can_methods_create
+    int can_methods_edit
+    int can_methods_publish
     int can_categories
+    int can_categories_create
+    int can_categories_edit
+    int can_analytics
     datetime created_at
   }
 
@@ -243,7 +269,7 @@ erDiagram
 | IDs | Users, events, posts, categories: text/UUID. Methods: stable **integer** IDs (favorites and related methods). |
 | Bilingual | `_de` / `_en` columns, no locale tables. |
 | Status | Content: `draft` \| `scheduled` \| `published` \| `rejected` (events have no `scheduled`). |
-| Trust | `draft` (review), `approved` (may publish directly), `verified`. Independent of `can_*`. |
+| Trust | `draft` (review), `approved`, `verified`. Independent of `can_*`. Publish is the matching `can_*_publish` flag, not trust. |
 | Related methods | `blog_posts.related_method_ids` is a serialized ID list, not a join table. |
 | Categories | Delete is blocked while posts or methods still reference the category. |
 | Auth tokens | Magic link stores a **hash**, not plaintext; one-time use via `used_at`. |
@@ -268,7 +294,7 @@ flowchart TB
 | Session | Cookie `op_session`, validated against D1, not KV |
 | XSS | Server-side rich-text allowlist; tight field length limits |
 | HTTP | CSP, `X-Frame-Options: DENY`, `nosniff`, JSON `Cache-Control: no-store` |
-| Rate limit | Magic link (email, fail-open without KV); contact (IP, fail-closed in production without KV) |
+| Rate limit | Magic link (email, fail-open without KV); contact (IP, fail-closed in production without KV); studio translate (per user, fail-closed without KV) |
 | Enumeration | Unknown magic-link email → same `ok` as a known address |
 | Contact | No D1 insert; honeypot field still answered with `ok` |
 
@@ -280,4 +306,4 @@ Typical chain before a production deploy: dependency audit (high) → unit and s
 
 ## 7. API reference
 
-Full HTTP contracts: [../openapi.yaml](../openapi.yaml).
+Full HTTP contracts: [../openapi.yaml](../openapi.yaml). Product map: [features.md](features.md). Pages and workers: [structure.md](structure.md). Grants and publish: [studio.md](studio.md).
