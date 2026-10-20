@@ -1,0 +1,41 @@
+# Secrets
+.secrets.env
+.env
+.env.*
+!.env.example
+**/.env
+!**/.env.example
+*.pem
+*.key
+
+# Dependencies
+node_modules/
+vendor/
+.venv/
+venv/
+
+# Build
+dist/
+build/
+.next/
+.out/
+target/
+
+# Caches, logs, coverage
+.cache/
+*.log
+__pycache__/
+*.pyc
+.pytest_cache/
+coverage/
+.coverage
+*.sqlite
+*.sqlite-*
+
+# Runtime data
+data/
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
