@@ -4,8 +4,6 @@ Public. License: MIT.
 
 Public architecture notes for Open Practice. No application source and no production data. Live site: https://open-practice.org
 
-GitHub folder name is still `OpenPractice-Showcase`. Intended Forgejo name is `site-open-practice`.
-
 This repo mirrors the structure and features of the private application repo. When that product changes, the docs and the OpenAPI snapshot here change with it.
 
 ## Start
